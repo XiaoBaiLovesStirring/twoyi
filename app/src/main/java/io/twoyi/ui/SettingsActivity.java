@@ -99,6 +99,7 @@ public class SettingsActivity extends AppCompatActivity {
 
             Preference importApp = findPreference(R.string.settings_key_import_app);
             Preference export = findPreference(R.string.settings_key_manage_files);
+            Preference magisk = findPreference("magisk");
 
             Preference shutdown = findPreference(R.string.settings_key_shutdown);
             Preference reboot = findPreference(R.string.settings_key_reboot);
@@ -111,6 +112,11 @@ public class SettingsActivity extends AppCompatActivity {
 
             importApp.setOnPreferenceClickListener(preference -> {
                 UIHelper.startActivity(getContext(), SelectAppActivity.class);
+                return true;
+            });
+
+            magisk.setOnPreferenceClickListener(preference -> {
+                UIHelper.startActivity(getContext(), MagiskManagerActivity.class);
                 return true;
             });
 

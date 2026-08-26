@@ -92,4 +92,84 @@
     <string name="settings_key_shutdown">Shutdown</string>
     <string name="settings_key_reboot">Reboot</string>
     <string name="replace_rom_unofficial_tips">Sorry, please edit the rom info and avoid using official author name :)</string>
+
+    <!-- Home Activity -->
+    <string name="home_status">Status</string>
+    <string name="home_status_running">Container Running</string>
+    <string name="home_status_running_detail">The twoyi container is active</string>
+    <string name="home_status_stopped">Container Stopped</string>
+    <string name="home_status_stopped_detail">Tap Start to boot the container</string>
+    <string name="home_container_version">Container Version</string>
+    <string name="home_memory_usage">System Memory</string>
+    <string name="home_uptime">Uptime</string>
+    <string name="home_uptime_format">%dh %dm</string>
+    <string name="home_uptime_na">N/A</string>
+    <string name="home_quick_actions">Quick Actions</string>
+    <string name="home_tools">Tools</string>
+    <string name="home_start">Start</string>
+    <string name="home_stop">Stop</string>
+    <string name="home_reboot">Reboot</string>
+    <string name="home_import">Import</string>
+    <string name="home_magisk">Magisk</string>
+    <string name="home_already_running">Container is already running!</string>
+    <string name="home_not_running">Container is not running!</string>
+    <string name="home_shutdown_ok">Container stopped</string>
+    <string name="home_footer">twoyi-magisk enhanced edition</string>
+
+    <!-- Magisk Manager -->
+    <string name="magisk_title">Magisk Manager</string>
+    <string name="magisk_status_installed">Magisk is installed</string>
+    <string name="magisk_status_not_installed">Magisk not installed</string>
+    <string name="magisk_status_container_offline">Container offline</string>
+    <string name="magisk_inject_btn">Inject Magisk</string>
+    <string name="magisk_injecting">Injecting Magisk…</string>
+    <string name="magisk_inject_success">Magisk injected successfully</string>
+    <string name="magisk_inject_partial">Magisk overlay created (binaries needed)</string>
+    <string name="magisk_inject_failed">Failed to inject Magisk</string>
+    <string name="magisk_install_module">Install Module</string>
+    <string name="magisk_module_list">Installed Modules</string>
+    <string name="magisk_no_modules">No Magisk modules installed\nTap + to install one</string>
+    <string name="magisk_installing">Installing module…</string>
+    <string name="magisk_install_success">Module installed successfully</string>
+    <string name="magisk_install_failed">Failed to install module</string>
+    <string name="magisk_no_file_manager">No file manager available</string>
+    <string name="magisk_container_required">Container must be running first</string>
+    <string name="magisk_unknown">Unknown</string>
+    <string name="magisk_refresh">Refresh</string>
+    <string name="magisk_module_enabled">Enabled</string>
+    <string name="magisk_module_disabled">Disabled</string>
+    <string name="magisk_module_enabled_toast">Module enabled</string>
+    <string name="magisk_module_disabled_toast">Module disabled</string>
+    <string name="magisk_module_remove">Remove module</string>
+    <string name="magisk_module_details">View details</string>
+    <string name="magisk_module_removed">Module removed</string>
+    <string name="magisk_module_status">Status</string>
+    <string name="magisk_settings">Magisk</string>
+    <string name="magisk_settings_summary">Manage Magisk modules in the container</string>
+
+    <!-- Enhanced Package Importer -->
+    <string name="importer_title">Package Importer</string>
+    <string name="importer_filter_title">Format filter</string>
+    <string name="importer_no_files">No files selected</string>
+    <string name="importer_files_selected">%d file(s) selected</string>
+    <string name="importer_format">Format: %s</string>
+    <string name="importer_empty">Select files to import</string>
+    <string name="importer_batch_mode">Enable batch installation</string>
+    <string name="importer_pick_files">Pick Files</string>
+    <string name="importer_install_disabled">Select files</string>
+    <string name="importer_install_single">Install Single</string>
+    <string name="importer_install_batch">Install All (%d)</string>
+    <string name="importer_processing">Processing files…</string>
+    <string name="importer_no_apk_found">No APK files found in the selected files</string>
+    <string name="importer_invalid_apk">One or more files are invalid APKs</string>
+    <string name="importer_error">An error occurred during import</string>
+    <string name="importer_bundle_install">Installing files as a bundle</string>
+    <string name="importer_pick_error">Could not open file picker</string>
+
+    <string-array name="importer_format_options">
+        <item>Auto detect</item>
+        <item>APK only</item>
+        <item>Archives (ZIP/XAPK)</item>
+    </string-array>
+
 </resources>

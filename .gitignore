@@ -1,16 +1,29 @@
+# Android
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+.gradle/
+build/
 local.properties
-dl.sh
+.idea/
+*.apk
+*.aab
+*.7z
+*.zip
+*.tar.gz
+*.so
+
+# Rust
+target/
+app/rs/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# Misc
+*.log
+*.tmp

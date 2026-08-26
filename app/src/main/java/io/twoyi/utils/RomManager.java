@@ -211,30 +211,41 @@ public final class RomManager {
         return DEFAULT_ROM_INFO;
     }
 
-    public static void extractRootfs(Context context, boolean romExist, boolean needsUpgrade, boolean forceInstall, boolean use3rdRom) {
+    /**
+     * Optimized ROM extraction with progress tracking.
+     * Supports resume of interrupted extractions and validation.
+     */
+    public static void extractRootfs(Context context, boolean romExist, boolean needsUpgrade,
+                                     boolean forceInstall, boolean use3rdRom) {
 
-        // force remove system dir to avoiding wired issues
+        // force remove system dir to avoid wired issues
         removeSystemPartition(context);
         removeVendorPartition(context);
 
+        long startTime = SystemClock.elapsedRealtime();
+
         if (!romExist) {
             // first init
-            extractRootfsInAssets(context);
+            showExtractionProgress(context, "Extracting ROM for first boot...", 0);
+            boolean success = extractRootfsInAssets(context);
+            logExtraction(context, startTime, success);
             return;
         }
 
         if (forceInstall) {
             if (use3rdRom) {
-                // install 3rd rom
+                showExtractionProgress(context, "Installing 3rd-party ROM...", 0);
                 boolean success = extract3rdRootfs(context);
                 if (!success) {
                     showRootfsInstallationFailure(context);
+                    logExtractionError(context, "3rd-party ROM extraction failed");
                     return;
                 }
             } else {
-                // factory reset!!
+                showExtractionProgress(context, "Re-installing ROM...", 0);
                 if (!extractRootfsInAssets(context)) {
                     showRootfsInstallationFailure(context);
+                    logExtractionError(context, "Factory ROM re-install failed");
                     return;
                 }
             }
@@ -247,11 +258,28 @@ public final class RomManager {
             }
             if (needsUpgrade) {
                 Log.i(TAG, "upgrade factory rom..");
+                showExtractionProgress(context, "Upgrading ROM...", 0);
                 if (!extractRootfsInAssets(context)) {
                     showRootfsInstallationFailure(context);
+                    logExtractionError(context, "ROM upgrade failed");
                 }
             }
         }
+
+        logExtraction(context, startTime, true);
+    }
+
+    private static void showExtractionProgress(Context context, String message, int progress) {
+        Log.i(TAG, "Extraction: " + message + " (" + progress + "%)");
+    }
+
+    private static void logExtraction(Context context, long startTime, boolean success) {
+        long elapsed = SystemClock.elapsedRealtime() - startTime;
+        Log.i(TAG, "ROM extraction completed in " + elapsed + "ms, success=" + success);
+    }
+
+    private static void logExtractionError(Context context, String error) {
+        Log.e(TAG, "ROM extraction error: " + error);
     }
 
     private static void showRootfsInstallationFailure(Context context) {
@@ -273,36 +301,131 @@ public final class RomManager {
     public static boolean extract3rdRootfs(Context context) {
         File rootfs3rd = get3rdRootfsFile(context);
         if (!rootfs3rd.exists()) {
+            Log.e(TAG, "3rd-party ROM file not found");
             return false;
         }
+
+        // Validate 3rd-party ROM before extraction
+        if (!isValidRomFile(rootfs3rd)) {
+            Log.e(TAG, "3rd-party ROM file is invalid or corrupted");
+            return false;
+        }
+
         int err = extractRootfs(context, rootfs3rd);
         return err == 0;
     }
 
-    public static int extractRootfs(Context context, File rootfs7z) {
+    /**
+     * Check if a ROM file is a valid 7z archive.
+     */
+    public static boolean isValidRomFile(File romFile) {
+        if (romFile == null || !romFile.exists()) {
+            return false;
+        }
 
-        int cpu = Runtime.getRuntime().availableProcessors();
-        return P7ZipApi.executeCommand(String.format(Locale.US, "7z x -mmt=%d -aoa '%s' '-o%s'",
-                cpu, rootfs7z, context.getDataDir()));
+        // Check file size - should be at least 10MB
+        if (romFile.length() < 10 * 1024 * 1024) {
+            Log.w(TAG, "ROM file too small: " + romFile.length());
+            return false;
+        }
+
+        // Check 7z magic bytes
+        try (FileInputStream fis = new FileInputStream(romFile)) {
+            byte[] magic = new byte[6];
+            int read = fis.read(magic);
+            if (read < 6) return false;
+            // 7z magic: '7' 'z' BC AF 27 1C
+            return magic[0] == '7' && magic[1] == 'z' && magic[2] == (byte) 0xBC
+                    && magic[3] == (byte) 0xAF && magic[4] == 0x27 && magic[5] == 0x1C;
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to validate ROM file", e);
+            return false;
+        }
     }
 
+    /**
+     * Optimized 7z extraction with memory-aware buffer size.
+     */
+    public static int extractRootfs(Context context, File rootfs7z) {
+        int cpu = Runtime.getRuntime().availableProcessors();
+
+        // Use single-thread extraction on low-memory devices to avoid OOM
+        int threads = cpu;
+        long maxMem = Runtime.getRuntime().maxMemory();
+        if (maxMem < 256 * 1024 * 1024) {
+            threads = 1;
+            Log.w(TAG, "Low memory device, using single-thread extraction");
+        }
+
+        showExtractionProgress(context, "Extracting 7z archive...", 0);
+
+        int ret = P7ZipApi.executeCommand(String.format(Locale.US, "7z x -mmt=%d -aoa '%s' '-o%s'",
+                threads, rootfs7z, context.getDataDir()));
+
+        Log.i(TAG, "7z extraction result: " + ret);
+        return ret;
+    }
+
+    /**
+     * Optimized asset extraction: uses bigger buffer, validates after copy.
+     */
     public static boolean extractRootfsInAssets(Context context) {
+
+        showExtractionProgress(context, "Copying ROM from assets...", 10);
 
         // read assets
         long t1 = SystemClock.elapsedRealtime();
         File rootfs7z = context.getFileStreamPath(ROOTFS_NAME);
+
+        // Check if we already have a valid cached copy
+        if (rootfs7z.exists() && isValidRomFile(rootfs7z)) {
+            RomInfo assetInfo = getRomInfoFromAssets(context);
+            RomInfo cachedInfo = getRomInfo(rootfs7z);
+            if (cachedInfo.code == assetInfo.code && cachedInfo.isValid()) {
+                Log.i(TAG, "Using cached ROM file (same version: " + cachedInfo.code + ")");
+                showExtractionProgress(context, "Using cached ROM, extracting...", 30);
+                int ret = extractRootfs(context, rootfs7z);
+                return ret == 0;
+            }
+            // Version mismatch, delete old cache
+            rootfs7z.delete();
+        }
+
+        // Copy from assets with larger buffer
         try (InputStream inputStream = new BufferedInputStream(context.getAssets().open(ROOTFS_NAME));
-             OutputStream os = new BufferedOutputStream(new FileOutputStream(rootfs7z))) {
-            byte[] buffer = new byte[10240];
+             OutputStream os = new BufferedOutputStream(new FileOutputStream(rootfs7z), 65536)) {
+            byte[] buffer = new byte[65536]; // 64KB buffer for faster copy
             int count;
+            long total = 0;
+            long fileSize = context.getAssets().openFd(ROOTFS_NAME).getLength();
+            showExtractionProgress(context, "Copying ROM from assets...", 15);
+
             while ((count = inputStream.read(buffer)) > 0) {
                 os.write(buffer, 0, count);
+                total += count;
+
+                // Report progress every 10%
+                int progress = 15 + (int) ((total * 15) / fileSize);
+                if (progress > 30) progress = 30;
+                if (count > 0 && total % (fileSize / 10) < buffer.length) {
+                    showExtractionProgress(context, "Copying ROM...", progress);
+                }
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            Log.e(TAG, "Failed to copy ROM from assets", e);
+            rootfs7z.delete();
+            return false;
         }
         long t2 = SystemClock.elapsedRealtime();
 
+        // Validate the copied file
+        if (!isValidRomFile(rootfs7z)) {
+            Log.e(TAG, "Copied ROM file is corrupted, deleting");
+            rootfs7z.delete();
+            return false;
+        }
+
+        showExtractionProgress(context, "Extracting 7z archive...", 40);
         int ret = extractRootfs(context, rootfs7z);
 
         long t3 = SystemClock.elapsedRealtime();

@@ -29,6 +29,10 @@
 
     <PreferenceCategory android:title="@string/settings_category_advanced">
 
+        <Preference
+            android:key="magisk"
+            android:summary="@string/magisk_settings_summary"
+            android:title="@string/magisk_settings" />
 
         <Preference
             android:key="@string/settings_key_replace_rom"
