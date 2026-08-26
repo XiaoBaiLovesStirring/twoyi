@@ -20,6 +20,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
+import android.widget.CompoundButton;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -29,6 +30,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.SwitchCompat;
 
 import com.topjohnwu.superuser.Shell;
 
@@ -36,10 +38,13 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
 import io.twoyi.R;
+import io.twoyi.utils.AppKV;
 import io.twoyi.utils.MagiskUtils;
 import io.twoyi.utils.RomManager;
 import io.twoyi.utils.ShellUtil;
@@ -57,6 +62,8 @@ public class MagiskManagerActivity extends AppCompatActivity {
     private ListView mModuleList;
     private TextView mEmptyView;
     private TextView mStatusView;
+    private SwitchCompat mAutoSwitch;
+    private TextView mAutoStatus;
     private ModuleAdapter mAdapter;
     private final List<MagiskUtils.MagiskModule> mModules = new ArrayList<>();
 
@@ -74,6 +81,8 @@ public class MagiskManagerActivity extends AppCompatActivity {
         mModuleList = findViewById(R.id.magisk_module_list);
         mEmptyView = findViewById(R.id.magisk_empty_view);
         mStatusView = findViewById(R.id.magisk_status);
+        mAutoSwitch = findViewById(R.id.magisk_auto_switch);
+        mAutoStatus = findViewById(R.id.magisk_auto_status);
 
         mAdapter = new ModuleAdapter();
         mModuleList.setAdapter(mAdapter);
@@ -93,6 +102,18 @@ public class MagiskManagerActivity extends AppCompatActivity {
 
         findViewById(R.id.magisk_refresh).setOnClickListener(v -> refreshModules());
         findViewById(R.id.magisk_inject_btn).setOnClickListener(v -> injectMagisk());
+
+        // Auto-download toggle
+        boolean autoEnabled = AppKV.getBooleanConfig(this, AppKV.MAGISK_AUTO_DOWNLOAD, false);
+        mAutoSwitch.setChecked(autoEnabled);
+        updateAutoStatus(autoEnabled);
+        mAutoSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            AppKV.setBooleanConfig(MagiskManagerActivity.this, AppKV.MAGISK_AUTO_DOWNLOAD, isChecked);
+            updateAutoStatus(isChecked);
+            if (isChecked && isContainerRunning()) {
+                downloadAndConfigureMagisk();
+            }
+        });
 
         refreshStatus();
         refreshModules();
@@ -212,6 +233,63 @@ public class MagiskManagerActivity extends AppCompatActivity {
         }).fail(err -> {
             UIHelper.dismiss(dialog);
             Toast.makeText(this, R.string.magisk_install_failed, Toast.LENGTH_SHORT).show();
+        });
+    }
+
+    private void updateAutoStatus(boolean enabled) {
+        if (mAutoStatus != null) {
+            mAutoStatus.setText(enabled ? R.string.magisk_auto_download_on : R.string.magisk_auto_download_off);
+        }
+    }
+
+    private void downloadAndConfigureMagisk() {
+        // Auto-download and configure Magisk using the bundled binaries from assets.
+        // This method injects Magisk into the container using the native libraries
+        // bundled in the APK assets (Plan B: Full Magisk Injection).
+        if (!isContainerRunning()) {
+            runOnUiThread(() ->
+                    Toast.makeText(this, R.string.magisk_container_required, Toast.LENGTH_SHORT).show());
+            return;
+        }
+
+        ProgressDialog dialog = UIHelper.getProgressDialog(this);
+        dialog.setCancelable(false);
+        dialog.setMessage(getString(R.string.magisk_injecting));
+        dialog.show();
+
+        UIHelper.defer().when(() -> {
+            // Step 1: Create Magisk overlay structure
+            MagiskUtils.createMagiskOverlay(this);
+
+            // Step 2: Inject Magisk binaries from bundled assets
+            boolean injected = MagiskUtils.injectMagisk(this);
+
+            SystemClock.sleep(1000);
+
+            // Step 3: Start magiskd daemon
+            boolean daemonStarted = false;
+            if (injected) {
+                daemonStarted = MagiskUtils.startMagiskDaemon(this);
+            }
+
+            return injected && daemonStarted;
+        }).done(result -> {
+            UIHelper.dismiss(dialog);
+            if (result) {
+                runOnUiThread(() -> {
+                    Toast.makeText(this, R.string.magisk_configured, Toast.LENGTH_SHORT).show();
+                    refreshStatus();
+                });
+            } else {
+                runOnUiThread(() -> {
+                    Toast.makeText(this, R.string.magisk_inject_partial, Toast.LENGTH_SHORT).show();
+                    refreshStatus();
+                });
+            }
+        }).fail(err -> {
+            UIHelper.dismiss(dialog);
+            runOnUiThread(() ->
+                    Toast.makeText(this, R.string.magisk_inject_failed, Toast.LENGTH_SHORT).show());
         });
     }
 

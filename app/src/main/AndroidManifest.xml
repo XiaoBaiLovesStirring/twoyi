@@ -60,6 +60,8 @@
             android:label="@string/importer_title"
             android:screenOrientation="portrait" />
 
+        <activity android:name=".ui.RomImportActivity" />
+
 
         <activity
             android:name=".ui.AboutActivity"

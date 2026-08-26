@@ -172,4 +172,37 @@
         <item>Archives (ZIP/XAPK)</item>
     </string-array>
 
+    <!-- ROM Import -->
+    <string name="rom_import_title">Import ROM</string>
+    <string name="rom_import_desc">Select a 7z ROM file to replace the container system</string>
+    <string name="rom_import_pick">Select ROM File</string>
+    <string name="rom_import_copying">Copying ROM file…</string>
+    <string name="rom_import_validating">Validating ROM…</string>
+    <string name="rom_import_confirm_title">ROM Info</string>
+    <string name="rom_import_confirm_message">Author: %1$s\nVersion: %2$s\n\n%3$s</string>
+    <string name="rom_import_confirm_apply">Apply &amp; Reboot</string>
+    <string name="rom_import_cancel">Cancel</string>
+    <string name="rom_import_invalid">Invalid ROM file! Only 7z archives are supported.</string>
+    <string name="rom_import_too_small">ROM file is too small or corrupted.</string>
+    <string name="rom_import_unknown_author">Unknown author ROM, please use official releases.</string>
+    <string name="rom_import_success">ROM imported successfully! Rebooting…</string>
+    <string name="rom_import_error">Failed to import ROM: %1$s</string>
+    <string name="rom_import_no_file">No file selected</string>
+    <string name="rom_import_rom_info">ROM Info</string>
+    <string name="rom_import_author">Author</string>
+    <string name="rom_import_version">Version</string>
+    <string name="rom_import_description">Description</string>
+    <string name="rom_import_loading">Loading…</string>
+
+    <!-- Magisk auto-download -->
+    <string name="magisk_auto_download">Auto-download Magisk</string>
+    <string name="magisk_auto_download_summary">Automatically download and configure Magisk when container starts</string>
+    <string name="magisk_auto_download_on">Auto-download enabled</string>
+    <string name="magisk_auto_download_off">Auto-download disabled</string>
+    <string name="magisk_downloading">Downloading Magisk…</string>
+    <string name="magisk_download_success">Magisk downloaded successfully</string>
+    <string name="magisk_download_failed">Failed to download Magisk</string>
+    <string name="magisk_configuring">Configuring Magisk in container…</string>
+    <string name="magisk_configured">Magisk configured successfully</string>
+
 </resources>

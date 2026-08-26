@@ -31,6 +31,9 @@ public class AppKV {
 
     // 是否应该使用第三方 ROM
     public static final String SHOULD_USE_THIRD_PARTY_ROM = "should_use_third_party_rom";
+
+    // 是否自动下载并配置 Magisk
+    public static final String MAGISK_AUTO_DOWNLOAD = "magisk_auto_download";
     public static boolean getBooleanConfig(Context context,  String key, boolean fallback) {
         return getPref(context).getBoolean(key, fallback);
     }

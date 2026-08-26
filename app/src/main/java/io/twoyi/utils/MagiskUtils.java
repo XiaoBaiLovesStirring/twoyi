@@ -7,7 +7,10 @@
 package io.twoyi.utils;
 
 import android.content.Context;
+import android.content.res.AssetManager;
 import android.util.Log;
+
+import com.topjohnwu.superuser.Shell;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -16,23 +19,360 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * @author twoyi-magisk
- * Utility class for Magisk integration and module management.
+ * Utility class for Magisk integration, full injection, and module management.
  */
 public final class MagiskUtils {
 
     private static final String TAG = "MagiskUtils";
 
-    private static final String MAGISK_DIR = ".magisk";
-    private static final String MODULES_DIR = "modules";
+    private static final String MAGISK_ASSET_DIR = "magisk";
     private static final String MODULE_PROP = "module.prop";
+
+    // Magisk binaries to inject into container
+    private static final String[] MAGISK_BINARIES = {
+            "magisk64",      // Main Magisk binary (64-bit)
+            "magiskinit",    // Init replacement
+            "magiskpolicy",  // SELinux policy tool
+            "busybox"        // Busybox utilities
+    };
+
+    private static final String[] MAGISK_BIN_NAMES = {
+            "magisk",
+            "magiskinit",
+            "magiskpolicy",
+            "busybox"
+    };
 
     private MagiskUtils() {
     }
+
+    // ============================================================
+    //  Magisk Injection (Plan B: Full Magisk Injection)
+    // ============================================================
+
+    /**
+     * Inject Magisk into the container rootfs.
+     * This implements Plan B: Full Magisk Injection.
+     *
+     * Steps:
+     * 1. Extract Magisk native libraries from assets
+     * 2. Copy binaries to container's /sbin directory
+     * 3. Create su symlink
+     * 4. Set up /data/adb directory structure
+     * 5. Run magisk_inject.sh inside the container
+     * 6. Start magiskd daemon
+     *
+     * @return true if injection was successful
+     */
+    public static boolean injectMagisk(Context context) {
+        Log.i(TAG, "Starting full Magisk injection (Plan B)...");
+
+        // Step 1: Extract Magisk binaries from assets to container's tmp dir
+        File rootfs = RomManager.getRootfsDir(context);
+        if (!rootfs.exists()) {
+            Log.e(TAG, "Container rootfs does not exist at " + rootfs);
+            return false;
+        }
+
+        // Target directories inside container
+        File containerTmp = new File(rootfs, "data/local/tmp/magisk");
+        File containerSbin = new File(rootfs, "sbin");
+
+        // Ensure tmp directory exists
+        if (!containerTmp.exists()) {
+            containerTmp.mkdirs();
+        }
+
+        // Step 2: Extract binaries from assets
+        Log.i(TAG, "Extracting Magisk binaries from assets...");
+        try {
+            if (!extractMagiskBinaries(context, containerTmp)) {
+                Log.e(TAG, "Failed to extract Magisk binaries from assets");
+                return false;
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Error extracting Magisk binaries", e);
+            return false;
+        }
+
+        // Step 3: Copy binaries to /sbin
+        Log.i(TAG, "Copying binaries to " + containerSbin);
+        for (int i = 0; i < MAGISK_BINARIES.length; i++) {
+            File src = new File(containerTmp, MAGISK_BINARIES[i]);
+            File dst = new File(containerSbin, MAGISK_BIN_NAMES[i]);
+            if (src.exists()) {
+                try {
+                    copyFile(src, dst);
+                    dst.setExecutable(true);
+                    Log.d(TAG, "  Copied " + MAGISK_BINARIES[i] + " -> " + dst);
+                } catch (IOException e) {
+                    Log.w(TAG, "  Failed to copy " + MAGISK_BINARIES[i], e);
+                }
+            }
+        }
+
+        // Step 4: Create su symlink
+        File suLink = new File(containerSbin, "su");
+        File magiskTarget = new File(containerSbin, "magisk");
+        try {
+            if (suLink.exists()) {
+                suLink.delete();
+            }
+            java.nio.file.Files.createSymbolicLink(
+                    suLink.toPath(), magiskTarget.toPath());
+            Log.i(TAG, "Created su symlink: " + suLink + " -> " + magiskTarget);
+        } catch (IOException e) {
+            Log.w(TAG, "Failed to create su symlink, copying binary instead", e);
+            try {
+                copyFile(magiskTarget, suLink);
+            } catch (IOException e2) {
+                Log.e(TAG, "Failed to create su", e2);
+            }
+        }
+
+        // Also create /system/bin/su and /system/xbin/su for compatibility
+        for (String dir : new String[]{"system/bin", "system/xbin", "vendor/bin"}) {
+            File compatDir = new File(rootfs, dir);
+            if (compatDir.exists()) {
+                File compatSu = new File(compatDir, "su");
+                try {
+                    if (compatSu.exists()) compatSu.delete();
+                    java.nio.file.Files.createSymbolicLink(
+                            compatSu.toPath(), suLink.toPath());
+                } catch (IOException ignored) {
+                }
+            }
+        }
+
+        // Step 5: Set up /data/adb directory structure
+        Log.i(TAG, "Setting up /data/adb directories...");
+        File adbDir = new File(rootfs, "data/adb");
+        createDirIfNeeded(new File(adbDir, "magisk"));
+        createDirIfNeeded(new File(adbDir, "modules"));
+        createDirIfNeeded(new File(adbDir, "modules_update"));
+        createDirIfNeeded(new File(adbDir, "post-fs-data.d"));
+        createDirIfNeeded(new File(adbDir, "service.d"));
+
+        // Create Magisk config file
+        File configFile = new File(adbDir, "magisk/config");
+        if (!configFile.getParentFile().exists()) {
+            configFile.getParentFile().mkdirs();
+        }
+        if (!configFile.exists()) {
+            try {
+                configFile.getParentFile().mkdirs();
+                try (FileOutputStream fos = new FileOutputStream(configFile)) {
+                    String config = "KEEPVERITY=true\nKEEPFORCEENCRYPT=true\nRECOVERYMODE=false\n";
+                    fos.write(config.getBytes("UTF-8"));
+                }
+            } catch (IOException e) {
+                Log.w(TAG, "Failed to create Magisk config", e);
+            }
+        }
+
+        // Create empty Magisk database
+        File dbFile = new File(adbDir, "magisk.db");
+        if (!dbFile.exists()) {
+            try {
+                dbFile.createNewFile();
+                dbFile.setExecutable(true);
+            } catch (IOException e) {
+                Log.w(TAG, "Failed to create magisk.db", e);
+            }
+        }
+
+        // Step 6: Run the injection script inside the container
+        Log.i(TAG, "Running magisk_inject.sh inside container...");
+        boolean scriptResult = runMagiskInjectScript(context);
+
+        // Step 7: Verify installation
+        boolean magiskExists = new File(containerSbin, "magisk").exists();
+        boolean suExists = new File(containerSbin, "su").exists();
+        boolean magiskPolicyExists = new File(containerSbin, "magiskpolicy").exists();
+
+        if (magiskExists && suExists) {
+            Log.i(TAG, "Magisk injection completed: binaries=" + magiskExists
+                    + " su=" + suExists + " policy=" + magiskPolicyExists
+                    + " daemon=" + scriptResult);
+            return true;
+        } else {
+            Log.e(TAG, "Magisk injection incomplete: binaries=" + magiskExists
+                    + " su=" + suExists + " policy=" + magiskPolicyExists);
+            return false;
+        }
+    }
+
+    /**
+     * Extract Magisk native libraries from the app's assets into the target directory.
+     */
+    private static boolean extractMagiskBinaries(Context context, File targetDir) throws IOException {
+        AssetManager assets = context.getAssets();
+        String magiskAssetPath = MAGISK_ASSET_DIR;
+
+        // Check if the magisk asset directory exists
+        String[] assetFiles;
+        try {
+            assetFiles = assets.list(magiskAssetPath);
+        } catch (IOException e) {
+            Log.e(TAG, "Magisk assets not found at " + magiskAssetPath, e);
+            return false;
+        }
+
+        if (assetFiles == null || assetFiles.length == 0) {
+            Log.e(TAG, "No files in magisk asset directory");
+            return false;
+        }
+
+        boolean anyExtracted = false;
+        for (String assetFile : MAGISK_BINARIES) {
+            File targetFile = new File(targetDir, assetFile);
+            try (InputStream in = assets.open(magiskAssetPath + "/" + assetFile);
+                 FileOutputStream out = new FileOutputStream(targetFile)) {
+                byte[] buffer = new byte[65536];
+                int count;
+                while ((count = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, count);
+                }
+                targetFile.setExecutable(true);
+                Log.d(TAG, "  Extracted: " + assetFile + " (" + targetFile.length() + " bytes)");
+                anyExtracted = true;
+            } catch (IOException e) {
+                Log.w(TAG, "  Failed to extract " + assetFile + ": " + e.getMessage());
+            }
+        }
+
+        return anyExtracted;
+    }
+
+    /**
+     * Run the magisk_inject.sh script inside the container.
+     * This script is copied to the container's /data/local/tmp/ and executed.
+     */
+    private static boolean runMagiskInjectScript(Context context) {
+        File rootfs = RomManager.getRootfsDir(context);
+        File scriptInContainer = new File(rootfs, "data/local/tmp/magisk_inject.sh");
+
+        // Copy the injection script to the container
+        try (InputStream in = context.getAssets().open("scripts/magisk_inject.sh");
+             FileOutputStream out = new FileOutputStream(scriptInContainer)) {
+            byte[] buffer = new byte[4096];
+            int count;
+            while ((count = in.read(buffer)) > 0) {
+                out.write(buffer, 0, count);
+            }
+            scriptInContainer.setExecutable(true);
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to copy magisk_inject.sh to container", e);
+            return false;
+        }
+
+        // Execute the script inside the container using shell
+        try {
+            Shell shell = ShellUtil.newSh();
+            List<String> result = shell.newJob()
+                    .add("sh " + scriptInContainer.getAbsolutePath())
+                    .exec()
+                    .getOut();
+
+            for (String line : result) {
+                Log.d(TAG, "  [container] " + line);
+            }
+
+            // Check exit code
+            int exitCode = shell.newJob()
+                    .add("echo $?")
+                    .exec()
+                    .getOut()
+                    .stream()
+                    .findFirst()
+                    .map(s -> {
+                        try {
+                            return Integer.parseInt(s.trim());
+                        } catch (NumberFormatException e) {
+                            return -1;
+                        }
+                    })
+                    .orElse(-1);
+
+            return exitCode == 0;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to run injection script in container", e);
+            return false;
+        }
+    }
+
+    /**
+     * Check if the Magisk daemon (magiskd) is running inside the container.
+     */
+    public static boolean isMagiskDaemonRunning(Context context) {
+        try {
+            Shell shell = ShellUtil.newSh();
+            List<String> out = shell.newJob()
+                    .add("pidof magiskd 2>/dev/null || ps -ef | grep magiskd | grep -v grep | awk '{print $2}' | head -1")
+                    .exec()
+                    .getOut();
+            return out != null && !out.isEmpty() && !out.get(0).trim().isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Start the magiskd daemon inside the container.
+     */
+    public static boolean startMagiskDaemon(Context context) {
+        if (isMagiskDaemonRunning(context)) {
+            Log.i(TAG, "magiskd is already running");
+            return true;
+        }
+
+        Log.i(TAG, "Starting magiskd daemon...");
+        try {
+            Shell shell = ShellUtil.newSh();
+            List<String> out = shell.newJob()
+                    .add("nohup /sbin/magisk --daemon 2>/dev/null &")
+                    .add("sleep 2")
+                    .add("pidof magiskd")
+                    .exec()
+                    .getOut();
+
+            boolean started = out != null && !out.isEmpty() && !out.get(0).trim().isEmpty();
+            if (started) {
+                Log.i(TAG, "magiskd started successfully");
+            } else {
+                Log.w(TAG, "magiskd may not have started");
+            }
+            return started;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start magiskd", e);
+            return false;
+        }
+    }
+
+    /**
+     * Get the installed Magisk version from the container.
+     */
+    public static String getMagiskVersion(Context context) {
+        try {
+            Shell shell = ShellUtil.newSh();
+            List<String> out = shell.newJob()
+                    .add("/sbin/magisk -v 2>/dev/null || echo 'unknown'")
+                    .exec()
+                    .getOut();
+            if (out != null && !out.isEmpty()) {
+                return out.get(0).trim();
+            }
+        } catch (Exception ignored) {
+        }
+        return "unknown";
+    }
+
+    // ============================================================
+    //  Existing Magisk Module Management
+    // ============================================================
 
     /**
      * Check if Magisk is installed in the container rootfs.
@@ -50,9 +390,12 @@ public final class MagiskUtils {
     public static File getModulesDir(Context context) {
         File rootfs = RomManager.getRootfsDir(context);
         // Magisk modules are stored in /data/adb/modules on modern Magisk
-        File modulesDir = new File(rootfs, "sbin/.magisk/modules");
+        File modulesDir = new File(rootfs, "data/adb/modules");
         if (!modulesDir.exists()) {
             // Fallback to older path
+            modulesDir = new File(rootfs, "sbin/.magisk/modules");
+        }
+        if (!modulesDir.exists()) {
             modulesDir = new File(rootfs, "magisk/modules");
         }
         return modulesDir;
@@ -141,7 +484,6 @@ public final class MagiskUtils {
 
     /**
      * Install a Magisk module from a ZIP file.
-     * @return true if module was installed successfully
      */
     public static boolean installModule(Context context, File zipFile) {
         File rootfs = RomManager.getRootfsDir(context);
@@ -161,7 +503,6 @@ public final class MagiskUtils {
             // Find module.prop to determine module ID
             File moduleProp = new File(tempDir, MODULE_PROP);
             if (!moduleProp.exists()) {
-                // Try common.zip structure
                 File[] files = tempDir.listFiles();
                 if (files != null) {
                     for (File f : files) {
@@ -255,22 +596,6 @@ public final class MagiskUtils {
     }
 
     /**
-     * Inject Magisk into the container rootfs.
-     * This is a placeholder - actual Magisk injection requires a Magisk binary
-     * that is compatible with the container's architecture.
-     */
-    public static boolean injectMagisk(Context context) {
-        // TODO: Implement actual Magisk injection
-        // This requires:
-        // 1. Downloading/storing Magisk zip
-        // 2. Extracting magiskinit, magisk, magiskpolicy binaries
-        // 3. Patching the container's init to load Magisk
-        // 4. Setting up the Magisk overlay filesystem
-        Log.w(TAG, "Magisk injection not yet implemented");
-        return false;
-    }
-
-    /**
      * Create the Magisk overlay structure for module support.
      */
     public static boolean createMagiskOverlay(Context context) {
@@ -288,12 +613,15 @@ public final class MagiskUtils {
         return true;
     }
 
-    // -- File utility methods --
+    // ============================================================
+    //  File utility methods
+    // ============================================================
 
     private static void extractZip(File zipFile, File destDir) throws IOException {
         byte[] buffer = new byte[8192];
-        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(zipFile))) {
-            ZipEntry entry;
+        try (java.util.zip.ZipInputStream zis =
+                     new java.util.zip.ZipInputStream(new FileInputStream(zipFile))) {
+            java.util.zip.ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 File targetFile = new File(destDir, entry.getName());
 
@@ -331,16 +659,21 @@ public final class MagiskUtils {
             if (file.isDirectory()) {
                 copyDirectory(file, destFile);
             } else {
-                try (FileInputStream fis = new FileInputStream(file);
-                     FileOutputStream fos = new FileOutputStream(destFile)) {
-                    byte[] buffer = new byte[8192];
-                    int len;
-                    while ((len = fis.read(buffer)) > 0) {
-                        fos.write(buffer, 0, len);
-                    }
-                }
+                copyFile(file, destFile);
             }
         }
+    }
+
+    private static void copyFile(File src, File dst) throws IOException {
+        try (FileInputStream fis = new FileInputStream(src);
+             FileOutputStream fos = new FileOutputStream(dst)) {
+            byte[] buffer = new byte[8192];
+            int len;
+            while ((len = fis.read(buffer)) > 0) {
+                fos.write(buffer, 0, len);
+            }
+        }
+        dst.setExecutable(src.canExecute());
     }
 
     private static boolean deleteDirectory(File dir) {
@@ -357,6 +690,16 @@ public final class MagiskUtils {
         }
         return dir.delete();
     }
+
+    private static void createDirIfNeeded(File dir) {
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+    }
+
+    // ============================================================
+    //  MagiskModule model class
+    // ============================================================
 
     /**
      * Represents a Magisk module with its metadata.

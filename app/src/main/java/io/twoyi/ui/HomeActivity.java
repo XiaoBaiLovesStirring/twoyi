@@ -108,7 +108,7 @@ public class HomeActivity extends AppCompatActivity {
         mStopCard.setOnClickListener(v -> shutdownContainer());
         mRebootCard.setOnClickListener(v -> rebootContainer());
         mImportCard.setOnClickListener(v -> {
-            UIHelper.startActivity(this, EnhancedPackageImporterActivity.class);
+            UIHelper.startActivity(this, RomImportActivity.class);
         });
         mMagiskCard.setOnClickListener(v -> {
             UIHelper.startActivity(this, MagiskManagerActivity.class);
