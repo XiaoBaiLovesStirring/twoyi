@@ -111,6 +111,21 @@ fn syn_report(tx: &std::sync::mpsc::Sender<input_event>) {
     input_event_write(tx, EV_SYN, SYN_REPORT, SYN_REPORT);
 }
 
+/// Write single-touch protocol events (ABS_X/ABS_Y + BTN_TOUCH)
+/// This is REQUIRED for Android to recognize the device as a touchscreen,
+/// not a mouse/pointer device.
+fn write_single_touch(tx: &std::sync::mpsc::Sender<input_event>, x: i32, y: i32, pressed: bool) {
+    input_event_write(tx, EV_ABS, ABS_X, x);
+    input_event_write(tx, EV_ABS, ABS_Y, y);
+    if pressed {
+        input_event_write(tx, EV_KEY, BTN_TOUCH, 1);
+        input_event_write(tx, EV_KEY, BTN_TOOL_FINGER, 1);
+    } else {
+        input_event_write(tx, EV_KEY, BTN_TOUCH, 0);
+        input_event_write(tx, EV_KEY, BTN_TOOL_FINGER, 0);
+    }
+}
+
 pub fn handle_touch(ev: MotionEvent) {
     let opt = INPUT_SENDER.lock().unwrap();
     if let Some(ref fd) = *opt {
@@ -138,19 +153,19 @@ pub fn handle_touch(ev: MotionEvent) {
 
                 info!("DOWN pointer={} slot={} x={} y={}", pointer_id, slot_idx, x, y);
 
-                // Write slot + tracking ID
+                // --- Multi-touch protocol (Type B) ---
                 input_event_write(fd, EV_ABS, ABS_MT_SLOT, slot_idx as i32);
                 input_event_write(fd, EV_ABS, ABS_MT_TRACKING_ID, pointer_id);
-
-                // Write coordinates
                 input_event_write(fd, EV_ABS, ABS_MT_POSITION_X, x);
                 input_event_write(fd, EV_ABS, ABS_MT_POSITION_Y, y);
                 input_event_write(fd, EV_ABS, ABS_MT_PRESSURE, pressure);
 
-                // If this is the first finger, send BTN_TOUCH
+                // --- Single-touch protocol (for the first finger) ---
+                // This is CRITICAL: Android identifies touchscreen devices
+                // by ABS_X/ABS_Y + INPUT_PROP_DIRECT. Without ABS_X/ABS_Y,
+                // the device is treated as a mouse/pointer.
                 if *active == 1 {
-                    input_event_write(fd, EV_KEY, BTN_TOUCH, 1);
-                    input_event_write(fd, EV_KEY, BTN_TOOL_FINGER, 1);
+                    write_single_touch(fd, x, y, true);
                 }
 
                 syn_report(fd);
@@ -166,15 +181,15 @@ pub fn handle_touch(ev: MotionEvent) {
 
                 info!("UP: last finger lifted, clearing {} pointers", *active);
 
-                // Clear all pointers
+                // --- Multi-touch: release all slots ---
                 for (pid, (slot_idx, _, _, _, _)) in state.iter() {
+                    info!("  releasing pointer {} slot {}", pid, slot_idx);
                     input_event_write(fd, EV_ABS, ABS_MT_SLOT, *slot_idx as i32);
                     input_event_write(fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
                 }
 
-                // Send BTN_TOUCH release
-                input_event_write(fd, EV_KEY, BTN_TOUCH, 0);
-                input_event_write(fd, EV_KEY, BTN_TOOL_FINGER, 0);
+                // --- Single-touch: release ---
+                write_single_touch(fd, 0, 0, false);
 
                 syn_report(fd);
 
@@ -202,6 +217,15 @@ pub fn handle_touch(ev: MotionEvent) {
                     if *active > 0 {
                         *active -= 1;
                     }
+
+                    // After removing, update single-touch position to the remaining finger
+                    if *active > 0 {
+                        // Find the first remaining pointer
+                        if let Some((&_, &(_, rem_x, rem_y, rem_p, _))) = state.iter().next() {
+                            write_single_touch(fd, rem_x, rem_y, true);
+                            syn_report(fd);
+                        }
+                    }
                 }
             }
 
@@ -224,18 +248,26 @@ pub fn handle_touch(ev: MotionEvent) {
 
                         // Only write if coordinates actually changed
                         if entry.1 != x || entry.2 != y || entry.3 != pressure {
+                            // --- Multi-touch ---
                             input_event_write(fd, EV_ABS, ABS_MT_SLOT, slot_idx as i32);
                             input_event_write(fd, EV_ABS, ABS_MT_POSITION_X, x);
                             input_event_write(fd, EV_ABS, ABS_MT_POSITION_Y, y);
                             input_event_write(fd, EV_ABS, ABS_MT_PRESSURE, pressure);
+
+                            // --- Single-touch: update ABS_X/ABS_Y for slot 0 ---
+                            // This ensures smooth tracking by keeping the single-touch
+                            // protocol in sync with the first finger's position.
+                            if slot_idx == 0 {
+                                input_event_write(fd, EV_ABS, ABS_X, x);
+                                input_event_write(fd, EV_ABS, ABS_Y, y);
+                            }
 
                             entry.1 = x;
                             entry.2 = y;
                             entry.3 = pressure;
                         }
                     } else {
-                        // New pointer in Move event - this shouldn't normally happen
-                        // but handle it gracefully
+                        // New pointer in Move event - handle gracefully
                         info!("MOVE: new pointer {} detected, treating as DOWN", pid);
                         let mut slot = NEXT_SLOT.lock().unwrap();
                         let mut active = ACTIVE_POINTERS.lock().unwrap();
@@ -251,8 +283,7 @@ pub fn handle_touch(ev: MotionEvent) {
                         input_event_write(fd, EV_ABS, ABS_MT_PRESSURE, pressure);
 
                         if *active == 1 {
-                            input_event_write(fd, EV_KEY, BTN_TOUCH, 1);
-                            input_event_write(fd, EV_KEY, BTN_TOOL_FINGER, 1);
+                            write_single_touch(fd, x, y, true);
                         }
 
                         state.insert(pid, (slot_idx, x, y, pressure, true));
@@ -277,9 +308,7 @@ pub fn handle_touch(ev: MotionEvent) {
                     input_event_write(fd, EV_ABS, ABS_MT_TRACKING_ID, -1);
                 }
 
-                input_event_write(fd, EV_KEY, BTN_TOUCH, 0);
-                input_event_write(fd, EV_KEY, BTN_TOOL_FINGER, 0);
-
+                write_single_touch(fd, 0, 0, false);
                 syn_report(fd);
 
                 state.clear();
@@ -320,10 +349,25 @@ fn generate_touch_device(width: i32, height: i32) -> device_info {
     copy_to_cstr(TOUCH_PATH, &mut info.physical_location);
     copy_to_cstr(TOUCH_DEVICE_UNIQUE_ID, &mut info.unique_id);
 
-    // Mark as direct touch input (not a button pad)
+    // Mark as DIRECT touch input (NOT a pointer/mouse)
+    // INPUT_PROP_DIRECT = 0x01 tells Android this is a touchscreen
     info.prop_bitmask[0] = INPUT_PROP_DIRECT as u8;
 
-    // Enable relevant EV_KEY codes
+    // ===== Single-touch protocol (ABS_X/ABS_Y) =====
+    // CRITICAL: Without ABS_X/ABS_Y, Android treats the device as a
+    // mouse/pointer even with INPUT_PROP_DIRECT set.
+    // ABS_X and ABS_Y are the single-touch absolute coordinates.
+    let abs_x = ABS_X as usize;
+    let abs_y = ABS_Y as usize;
+    info.abs_bitmask[abs_x / 8] |= 1 << (abs_x % 8);
+    info.abs_bitmask[abs_y / 8] |= 1 << (abs_y % 8);
+    info.abs_min[ABS_X as usize] = 0;
+    info.abs_max[ABS_X as usize] = width as u32;
+    info.abs_min[ABS_Y as usize] = 0;
+    info.abs_max[ABS_Y as usize] = height as u32;
+
+    // ===== Multi-touch protocol (ABS_MT_*) =====
+    // Enable EV_KEY codes for touch events
     info.key_bitmask[BTN_TOUCH as usize / 8] |= 1 << (BTN_TOUCH as usize % 8);
     info.key_bitmask[BTN_TOOL_FINGER as usize / 8] |= 1 << (BTN_TOOL_FINGER as usize % 8);
 
@@ -341,11 +385,11 @@ fn generate_touch_device(width: i32, height: i32) -> device_info {
     info.abs_bitmask[abs_mt_tracking_id / 8] |= 1 << (abs_mt_tracking_id % 8);
     info.abs_bitmask[abs_mt_touch_major / 8] |= 1 << (abs_mt_touch_major % 8);
 
-    // X axis
+    // X axis (multi-touch)
     info.abs_min[ABS_MT_POSITION_X as usize] = 0;
     info.abs_max[ABS_MT_POSITION_X as usize] = width as u32;
 
-    // Y axis
+    // Y axis (multi-touch)
     info.abs_min[ABS_MT_POSITION_Y as usize] = 0;
     info.abs_max[ABS_MT_POSITION_Y as usize] = height as u32;
 
