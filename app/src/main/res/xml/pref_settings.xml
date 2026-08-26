@@ -29,6 +29,12 @@
 
     <PreferenceCategory android:title="@string/settings_category_advanced">
 
+        <SwitchPreference
+            android:key="root_access"
+            android:summary="@string/root_access_summary"
+            android:title="@string/root_access"
+            android:defaultValue="false" />
+
         <Preference
             android:key="magisk"
             android:summary="@string/magisk_settings_summary"

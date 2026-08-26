@@ -142,6 +142,14 @@
     <string name="magisk_module_details">查看详情</string>
     <string name="magisk_module_removed">模块已删除</string>
     <string name="magisk_module_status">状态</string>
+    <!-- Root Access -->
+    <string name="root_access">Root 权限</string>
+    <string name="root_access_summary">开启/关闭容器内的 Root 权限（Magisk 将处理 Root 请求）</string>
+    <string name="root_access_enabled">Root 权限已开启</string>
+    <string name="root_access_disabled">Root 权限已关闭</string>
+    <string name="root_access_error">切换 Root 权限失败</string>
+    <string name="root_access_container_offline">容器未运行，无法切换 Root 权限</string>
+
     <string name="magisk_settings">Magisk</string>
     <string name="magisk_settings_summary">管理容器中的 Magisk 模块</string>
 

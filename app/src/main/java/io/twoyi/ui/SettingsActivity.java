@@ -15,6 +15,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.preference.Preference;
 import android.preference.PreferenceFragment;
+import android.preference.SwitchPreference;
+import android.util.Log;
 import android.provider.DocumentsContract;
 import android.view.MenuItem;
 import android.view.View;
@@ -82,6 +84,9 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     public static class SettingsFragment extends PreferenceFragment {
+
+        private static final String TAG = "SettingsFragment";
+
         @Override
         public void onCreate(@Nullable Bundle savedInstanceState) {
             super.onCreate(savedInstanceState);
@@ -109,6 +114,61 @@ public class SettingsActivity extends AppCompatActivity {
             Preference donate = findPreference(R.string.settings_key_donate);
             Preference sendLog = findPreference(R.string.settings_key_sendlog);
             Preference about = findPreference(R.string.settings_key_about);
+
+            // Root access toggle
+            SwitchPreference rootAccess = (SwitchPreference) findPreference("root_access");
+            if (rootAccess != null) {
+                // Check current state from the container's file
+                Context ctx = getContext();
+                if (ctx != null) {
+                    File rootfs = RomManager.getRootfsDir(ctx);
+                    File rootFile = new File(rootfs, "data/.root_enabled");
+                    boolean rootEnabled = false;
+                    if (rootFile.exists()) {
+                        try {
+                            String content = new String(Files.readAllBytes(rootFile.toPath())).trim();
+                            rootEnabled = "1".equals(content);
+                        } catch (IOException ignored) {
+                            // File may be corrupted or not accessible
+                        }
+                    }
+                    rootAccess.setChecked(rootEnabled);
+                }
+
+                rootAccess.setOnPreferenceChangeListener((preference, newValue) -> {
+                    boolean enabled = (Boolean) newValue;
+                    Context context = getActivity();
+                    if (context == null) return false;
+
+                    if (!RomManager.romExist(context)) {
+                        Toast.makeText(context, R.string.root_access_container_offline, Toast.LENGTH_SHORT).show();
+                        return false;
+                    }
+
+                    try {
+                        File rootfs = RomManager.getRootfsDir(context);
+                        File rootFile = new File(rootfs, "data/.root_enabled");
+                        if (enabled) {
+                            // Enable root: write "1" to the file
+                            rootFile.getParentFile().mkdirs();
+                            try (java.io.FileWriter fw = new java.io.FileWriter(rootFile)) {
+                                fw.write("1");
+                                fw.flush();
+                            }
+                            Toast.makeText(context, R.string.root_access_enabled, Toast.LENGTH_SHORT).show();
+                        } else {
+                            // Disable root: delete the file
+                            rootFile.delete();
+                            Toast.makeText(context, R.string.root_access_disabled, Toast.LENGTH_SHORT).show();
+                        }
+                        return true;
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to toggle root access", e);
+                        Toast.makeText(context, R.string.root_access_error, Toast.LENGTH_SHORT).show();
+                        return false;
+                    }
+                });
+            }
 
             importApp.setOnPreferenceClickListener(preference -> {
                 UIHelper.startActivity(getContext(), SelectAppActivity.class);
