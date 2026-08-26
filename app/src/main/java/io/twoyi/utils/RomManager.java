@@ -9,6 +9,7 @@ package io.twoyi.utils;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
 import android.os.Build;
 import android.os.Process;
@@ -397,18 +398,32 @@ public final class RomManager {
             byte[] buffer = new byte[65536]; // 64KB buffer for faster copy
             int count;
             long total = 0;
-            long fileSize = context.getAssets().openFd(ROOTFS_NAME).getLength();
+            long fileSize = -1;
+
+            // Try to get file size for progress reporting (may fail on some Android versions)
+            try {
+                AssetFileDescriptor afd = context.getAssets().openFd(ROOTFS_NAME);
+                if (afd != null) {
+                    fileSize = afd.getLength();
+                    try { afd.close(); } catch (IOException ignored) {}
+                }
+            } catch (IOException e) {
+                Log.w(TAG, "Cannot get asset file descriptor, progress will be approximate", e);
+            }
+
             showExtractionProgress(context, "Copying ROM from assets...", 15);
 
             while ((count = inputStream.read(buffer)) > 0) {
                 os.write(buffer, 0, count);
                 total += count;
 
-                // Report progress every 10%
-                int progress = 15 + (int) ((total * 15) / fileSize);
-                if (progress > 30) progress = 30;
-                if (count > 0 && total % (fileSize / 10) < buffer.length) {
-                    showExtractionProgress(context, "Copying ROM...", progress);
+                // Report progress
+                if (fileSize > 0) {
+                    int progress = 15 + (int) ((total * 15) / fileSize);
+                    if (progress > 30) progress = 30;
+                    if (count > 0 && total % (fileSize / 10) < buffer.length) {
+                        showExtractionProgress(context, "Copying ROM...", progress);
+                    }
                 }
             }
         } catch (IOException e) {

@@ -117,10 +117,8 @@ pub fn handle_touch(ev: MotionEvent) {
 
         let action = ev.action();
         let pointer_index = ev.pointer_index();
-        let action_mask = action & MotionAction::MASK;
-        let action_code = action & !MotionAction::MASK;
 
-        match action_mask {
+        match action {
             MotionAction::Down | MotionAction::PointerDown => {
                 // New finger pressed
                 let pointer = ev.pointer_at_index(pointer_index);
@@ -161,7 +159,7 @@ pub fn handle_touch(ev: MotionEvent) {
                 state.insert(pointer_id, (slot_idx, x, y, pressure, true));
             }
 
-            MotionAction::Up => {
+            MotionAction::Up | MotionAction::Outside => {
                 // Last finger lifted
                 let mut state = TOUCH_STATE.lock().unwrap();
                 let mut active = ACTIVE_POINTERS.lock().unwrap();
@@ -330,12 +328,18 @@ fn generate_touch_device(width: i32, height: i32) -> device_info {
     info.key_bitmask[BTN_TOOL_FINGER as usize / 8] |= 1 << (BTN_TOOL_FINGER as usize % 8);
 
     // Enable ABS_MT capability bits
-    info.abs_bitmask[ABS_MT_POSITION_X as usize] = 0x80;
-    info.abs_bitmask[ABS_MT_POSITION_Y as usize] = 0x80;
-    info.abs_bitmask[ABS_MT_PRESSURE as usize] = 0x80;
-    info.abs_bitmask[ABS_MT_SLOT as usize] = 0x80;
-    info.abs_bitmask[ABS_MT_TRACKING_ID as usize] = 0x80;
-    info.abs_bitmask[ABS_MT_TOUCH_MAJOR as usize] = 0x80;
+    let abs_mt_position_x = ABS_MT_POSITION_X as usize;
+    let abs_mt_position_y = ABS_MT_POSITION_Y as usize;
+    let abs_mt_pressure = ABS_MT_PRESSURE as usize;
+    let abs_mt_slot = ABS_MT_SLOT as usize;
+    let abs_mt_tracking_id = ABS_MT_TRACKING_ID as usize;
+    let abs_mt_touch_major = ABS_MT_TOUCH_MAJOR as usize;
+    info.abs_bitmask[abs_mt_position_x / 8] |= 1 << (abs_mt_position_x % 8);
+    info.abs_bitmask[abs_mt_position_y / 8] |= 1 << (abs_mt_position_y % 8);
+    info.abs_bitmask[abs_mt_pressure / 8] |= 1 << (abs_mt_pressure % 8);
+    info.abs_bitmask[abs_mt_slot / 8] |= 1 << (abs_mt_slot % 8);
+    info.abs_bitmask[abs_mt_tracking_id / 8] |= 1 << (abs_mt_tracking_id % 8);
+    info.abs_bitmask[abs_mt_touch_major / 8] |= 1 << (abs_mt_touch_major % 8);
 
     // X axis
     info.abs_min[ABS_MT_POSITION_X as usize] = 0;
